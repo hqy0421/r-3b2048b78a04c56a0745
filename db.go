@@ -181,7 +181,11 @@ func start(bdb *bbolt.DB, s *Schema, o *Options, want map[string][32]byte, wtx *
 	if err := bdb.View(func(btx *bbolt.Tx) error {
 		db.baseTxID = txID(btx)
 		db.cur = closedSlot(db.baseTxID)
-		_, err := readHead(btx.Bucket([]byte(libBucket)))
+		lib := btx.Bucket([]byte(libBucket))
+		if _, err := readHead(lib); err != nil {
+			return err
+		}
+		_, err := readOrigin(lib)
 		return err
 	}); err != nil {
 		return nil, err

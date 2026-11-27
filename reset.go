@@ -15,11 +15,13 @@ import (
 
 // resetFile empties the named namespaces of the file at path, each one
 // stored, declared or "bolttable", which recreates the library's bucket
-// (revision head and change log) at the current layout number. One bbolt
-// transaction, committed explicitly so the commit sits inside op's mark,
-// deletes the stored named buckets and recreates the declared ones, every
-// table starting at the highest sequence its namespace stored, so NextID
-// never reissues an id across a prefix move, a rename or a removed table.
+// (revision head, change log and origin) at the current layout number. One
+// bbolt transaction, committed explicitly so the commit sits inside op's
+// mark, deletes the stored named buckets and recreates the declared ones,
+// every table starting at the highest sequence its namespace stored, so
+// NextID never reissues an id across a prefix move, a rename or a removed
+// table. The recreated library bucket starts at revision 0 with a new
+// origin, so a Position from before the reset names nothing after it.
 func resetFile(path string, s *Schema, want map[string][32]byte, names []string, op *faultOp) (err error) {
 	bdb, f, err := openBolt(path, stepReset, boltOptions(false))
 	if err != nil {
@@ -68,7 +70,18 @@ func reset(btx *bbolt.Tx, s *Schema, want map[string][32]byte, names []string, o
 			}
 		}
 	}
-	return ensureLib(btx)
+	if err := ensureLib(btx); err != nil {
+		return err
+	}
+	// A reset empties rows without recording a change, so no page of the
+	// feed can bring a projection over them forward. The file takes a new
+	// origin, which makes every Position from before the reset answer Full
+	// and tells its holder to rebuild.
+	lib := btx.Bucket([]byte(libBucket))
+	if err := putOrigin(lib, newOrigin()); err != nil {
+		return err
+	}
+	return nil
 }
 
 // deleteIfPresent deletes the top-level bucket name and returns its highest

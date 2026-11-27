@@ -13,14 +13,16 @@ import (
 
 // layoutNumber is the library's own on-disk layout: the library bucket's
 // keys, a namespace bucket's keys and the index and change encodings. A
-// change to any of them bumps it, which makes every older file a foreign
-// layout that Open must reset.
+// change to them bumps it, which makes every older file a foreign layout
+// that Open must reset. A key whose absence has a defined meaning, as an
+// origin-less file's does, needs no bump: Open stamps it as it goes.
 const layoutNumber uint32 = 1
 
 var (
 	keyLayout  = []byte("layout")
 	keyHead    = []byte("head")
 	keyChanges = []byte("changes")
+	keyOrigin  = []byte("origin")
 	keyDigest  = []byte("digest")
 )
 
@@ -152,11 +154,11 @@ func digestMismatches(btx *bbolt.Tx, names []string, want map[string][32]byte) *
 	return &fe
 }
 
-// missing plans what a matching file lacks: the library bucket or its log,
-// and any declared namespace, table or index bucket.
+// missing plans what a matching file lacks: the library bucket or its log and
+// origin, and any declared namespace, table or index bucket.
 func missing(btx *bbolt.Tx, s *Schema, lib *bbolt.Bucket) (openPlan, error) {
 	var plan openPlan
-	if lib == nil || lib.Bucket(keyChanges) == nil {
+	if lib == nil || lib.Bucket(keyChanges) == nil || lib.Get(keyOrigin) == nil {
 		plan.lib = true
 	} else if _, err := readHead(lib); err != nil {
 		return openPlan{}, err
@@ -241,7 +243,9 @@ func ensureNamespace(btx *bbolt.Tx, ns *Namespace, d [32]byte, seed uint64) erro
 }
 
 // ensureLib creates the library bucket at the current layout number, or
-// completes one that lacks its change log.
+// completes one that lacks its change log or origin. A file of an earlier
+// build stores no origin: Open stamps it once, so a Position taken from it
+// afterwards outlives reopen and compaction.
 func ensureLib(btx *bbolt.Tx) error {
 	lib, err := btx.CreateBucketIfNotExists([]byte(libBucket))
 	if err != nil {
@@ -254,6 +258,11 @@ func ensureLib(btx *bbolt.Tx) error {
 	}
 	if _, err := lib.CreateBucketIfNotExists(keyChanges); err != nil {
 		return fmt.Errorf("bolttable: create change log: %w", err)
+	}
+	if lib.Get(keyOrigin) == nil {
+		if err := putOrigin(lib, newOrigin()); err != nil {
+			return err
+		}
 	}
 	return nil
 }

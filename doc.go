@@ -26,6 +26,10 @@
 //
 // A transaction that writes a non-silent table, Touches a subject or sets a
 // Mark reserves the next revision and records one Change, which Since
-// returns and OnCommit receives in revision order. Every slice the package
+// returns and OnCommit receives in revision order. ReadTx.Position pairs a
+// revision with the file's origin, so a projection built from one snapshot
+// and paged SinceAt from it catches every later commit once, and learns to
+// rebuild instead when the file is another (Live's Swap to a different file)
+// or its retention has trimmed the position. Every slice the package
 // returns or keeps is a copy.
 package bolttable
